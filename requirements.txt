@@ -1,0 +1,5 @@
+flask
+firebase-admin
+torch
+sentence-transformers
+gunicorn
