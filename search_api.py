@@ -8,9 +8,9 @@ from firebase_admin import credentials, firestore
 # ----------------------------
 if not firebase_admin._apps:
     # Load Firebase credentials from environment variable
-    firebase_key = os.getenv("FIREBASE_KEY_JSON")
+    firebase_key = os.getenv("FIREBASE_KEY")
     if not firebase_key:
-        raise ValueError("❌ Missing FIREBASE_KEY_JSON environment variable")
+        raise ValueError("❌ Missing FIREBASE_KEY environment variable")
     cred = credentials.Certificate(json.loads(firebase_key))
     firebase_admin.initialize_app(cred)
 
