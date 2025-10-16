@@ -36,7 +36,10 @@ def hybrid_search(keyword, uid):
     user_province = user_loc.get("province", "").lower()
     query_text = f"{keyword} {user_city} {user_province}"
     query_emb = model.encode(query_text, convert_to_tensor=True)
-    listings_ref = db.collection("embeddings").stream()
+    # listings_ref = db.collection("embeddings").stream()
+    BATCH_SIZE = 100
+    listings_ref = db.collection("embeddings").limit(BATCH_SIZE).stream()
+    
     results = []
 
     for doc in listings_ref:
