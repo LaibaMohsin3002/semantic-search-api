@@ -30,67 +30,83 @@ def get_user_location(uid):
         return {"address": address, "city": city, "province": province}
     raise ValueError(f"No user found with uid: {uid}")
 
+import heapq
+
 def hybrid_search(keyword, uid):
     user_loc = get_user_location(uid)
     user_city = user_loc.get("city", "").lower()
     user_province = user_loc.get("province", "").lower()
     query_text = f"{keyword} {user_city} {user_province}"
     query_emb = model.encode(query_text, convert_to_tensor=True)
-    # listings_ref = db.collection("embeddings").stream()
-    BATCH_SIZE = 100
-    listings_ref = db.collection("embeddings").limit(BATCH_SIZE).stream()
-    
-    results = []
 
-    for doc in listings_ref:
-        data = doc.to_dict()
-        emb = torch.tensor(data["embedding"])
-        similarity = util.cos_sim(query_emb, emb).item()
-        crop_name = data.get("cropName", "")
-        crop_match = 1.0 if keyword.lower() in crop_name.lower() else 0.0
-        price = float(data.get("pricePerUnit", 1))
-        price_score = 1 / (1 + (price / 100))
+    top_results = []  # min-heap to store top 10 results
+    BATCH_SIZE = 50
+    last_doc = None
 
-        farmer_id = data.get("farmerId")
-        address = city = province = ""
-        if farmer_id:
-            farmer_ref = db.collection("users").document(farmer_id).get()
-            if farmer_ref.exists:
-                farmer_data = farmer_ref.to_dict()
-                loc_data = farmer_data.get("location", {})
-                if isinstance(loc_data, dict):
-                    address = loc_data.get("address", "")
-                    city = loc_data.get("city", "")
-                    province = loc_data.get("province", "")
-                else:
-                    address = loc_data
-                    city = province = ""
+    while True:
+        query = db.collection("embeddings").limit(BATCH_SIZE)
+        if last_doc:
+            query = query.start_after(last_doc)
+        batch = list(query.stream())
+        if not batch:
+            break
 
-        location_score = 0.0
-        if city.lower() == user_city:
-            location_score = 1.0
-        elif province.lower() == user_province:
-            location_score = 0.7
+        for doc in batch:
+            data = doc.to_dict()
+            emb = torch.tensor(data["embedding"])
+            similarity = util.cos_sim(query_emb, emb).item()
+            crop_name = data.get("cropName", "")
+            crop_match = 1.0 if keyword.lower() in crop_name.lower() else 0.0
+            price = float(data.get("pricePerUnit", 1))
+            price_score = 1 / (1 + (price / 100))
 
-        total_score = (
-            0.45 * similarity +
-            0.20 * crop_match +
-            0.15 * price_score +
-            0.20 * location_score
-        )
+            farmer_id = data.get("farmerId")
+            address = city = province = ""
+            if farmer_id:
+                farmer_ref = db.collection("users").document(farmer_id).get()
+                if farmer_ref.exists:
+                    farmer_data = farmer_ref.to_dict()
+                    loc_data = farmer_data.get("location", {})
+                    if isinstance(loc_data, dict):
+                        address = loc_data.get("address", "")
+                        city = loc_data.get("city", "")
+                        province = loc_data.get("province", "")
+                    else:
+                        address = loc_data
 
-        results.append({
-            "listingId": data.get("listingId"),
-            "cropName": crop_name,
-            "price": price,
-            "location": {"address": address, "city": city, "province": province},
-            "similarity": similarity,
-            "location_score": location_score,
-            "total_score": total_score
-        })
+            location_score = 0.0
+            if city.lower() == user_city:
+                location_score = 1.0
+            elif province.lower() == user_province:
+                location_score = 0.7
 
-    ranked = sorted(results, key=lambda x: (-x["total_score"], x["price"]))
-    return ranked[:10]
+            total_score = (
+                0.45 * similarity +
+                0.20 * crop_match +
+                0.15 * price_score +
+                0.20 * location_score
+            )
+
+            result = {
+                "listingId": data.get("listingId"),
+                "cropName": crop_name,
+                "price": price,
+                "location": {"address": address, "city": city, "province": province},
+                "similarity": similarity,
+                "location_score": location_score,
+                "total_score": total_score
+            }
+
+            # 🔹 keep top 10 only
+            if len(top_results) < 10:
+                heapq.heappush(top_results, (total_score, result))
+            else:
+                heapq.heappushpop(top_results, (total_score, result))
+
+        last_doc = batch[-1]
+
+    # return sorted top 10 descending
+    return [r[1] for r in sorted(top_results, key=lambda x: -x[0])]
 
 @app.route("/search", methods=["POST"])
 def search():
