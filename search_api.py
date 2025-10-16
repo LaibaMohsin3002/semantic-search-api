@@ -15,7 +15,7 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 app = Flask(__name__)
 
